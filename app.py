@@ -1,358 +1,487 @@
-"""
-内容创作 BI 看板 — 每日独立发布15篇文章追踪
-支持暗黑模式，数据持久化至本地 data.json
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
-import json, os
+from streamlit_autorefresh import st_autorefresh
+import json
+import io
 
-# ── 全局常量 ─────────────────────────────────────────────────────────────────
-DAILY_TARGET   = 15
-PROCESSES      = ["制作图片", "制作封面", "剪辑视频", "写文案", "上传帖子"]
-PROCESS_ICONS  = ["🖼️", "🎨", "🎬", "✍️", "📤"]
-DATA_FILE      = os.path.join(os.path.dirname(__file__), "data.json")
+# ═══════════════════════════════════════════════════════
+# 常量定义
+# ═══════════════════════════════════════════════════════
+DAILY_TARGET = 15
+PROCESSES = ["制作图片", "制作封面", "剪辑视频", "写文案", "上传帖子"]
+P_ICONS = ["🖼️", "🎨", "🎬", "✍", "📤"]
+PROC_COLORS = ["#4F8EF7", "#4F8EF7", "#2ECC71", "#4F8EF7", "#2ECC71"]
 
-# Plotly 暗色主题调色板
-COLORS = {
-    "primary":   "#4F8EF7",
-    "success":   "#2ECC71",
-    "warning":   "#F39C12",
-    "danger":    "#E74C3C",
-    "muted":     "#636EFA",
-    "process":   ["#4F8EF7","#2ECC71","#F39C12","#9B59B6","#1ABC9C"],
+# 颜色配置（黑白灰暗色调）
+CLR = {
+    "bg": "#0e0e0e",
+    "card": "#161616",
+    "border": "#262626",
+    "text1": "#f0f0f0",
+    "text2": "#888888",
+    "text3": "#444444",
+    "blue": "#4F8EF7",
+    "green": "#2ECC71",
+    "red": "#E74C3C",
+    "gridline": "rgba(255,255,255,0.05)",
 }
 
-# ── 页面配置 ─────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════
+# 页面配置
+# ═══════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="内容创作 BI 看板",
-    page_icon="📊",
+    page_title="内容创作看板",
+    page_icon="📋",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# 注入全局 CSS（兼容亮色/暗色主题）
-st.markdown("""
+st.markdown(f"""
 <style>
-/* 卡片统一样式 */
-.kpi-card {
-    background: var(--secondary-background-color);
-    border-radius: 14px;
-    padding: 20px 24px;
-    margin-bottom: 4px;
-    border-left: 5px solid var(--border-color, #4F8EF7);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-}
-.kpi-title  { font-size: 13px; color: #888; margin-bottom: 4px; letter-spacing: .5px; text-transform: uppercase; }
-.kpi-value  { font-size: 36px; font-weight: 700; line-height: 1.1; }
-.kpi-sub    { font-size: 13px; margin-top: 4px; }
-
-/* 进度条容器 */
-.proc-wrap  { margin-bottom: 14px; }
-.proc-label { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 4px; }
-.proc-bar-bg{ background: #2a2a3a; border-radius: 6px; height: 14px; width: 100%; overflow: hidden; }
-.proc-bar-fg{ height: 14px; border-radius: 6px; transition: width .6s ease; }
-
-/* 分割线 */
-hr { border-color: rgba(128,128,128,0.2) !important; }
+    /* 全局背景与布局 */
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stToolbar"] {{
+        background-color: {CLR['bg']} !important;
+    }}
+    section.main > div {{ padding-top: 1.6rem; padding-bottom: 2rem; }}
+    [data-testid="stSidebar"] > div:first-child {{
+        background-color: {CLR['card']};
+        padding: 1.8rem 1.4rem;
+        border-right: 1px solid {CLR['border']};
+    }}
+    /* 隐藏默认元素 */
+    #MainMenu, footer {{ visibility: hidden; }}
+    [data-testid="stDecoration"] {{ display: none; }}
+    /* 全局文字颜色 */
+    html, body, p, div, span, label {{ color: {CLR['text1']}; }}
+    
+    /* 标题区域 */
+    .topbar {{ display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; }}
+    .page-title {{ font-size: 24px; font-weight: 700; letter-spacing: -0.3px; color: {CLR['text1']}; }}
+    .page-sub {{ font-size: 12px; color: {CLR['text2']}; margin-top: 3px; }}
+    
+    /* Hero 区域 */
+    .hero {{
+        padding: 36px 0 28px;
+        text-align: center;
+        border-bottom: 1px solid {CLR['border']};
+        margin-bottom: 28px;
+    }}
+    .hero-label {{ font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: {CLR['text2']}; margin-bottom: 10px; }}
+    .hero-num {{ font-size: 72px; font-weight: 800; line-height: 1; letter-spacing: -2px; }}
+    .hero-denom {{ font-size: 32px; font-weight: 300; color: {CLR['text2']}; }}
+    .hero-sub {{ font-size: 12px; color: {CLR['text2']}; margin-top: 12px; letter-spacing: .3px; }}
+    
+    /* 进度条 */
+    .pbar-wrap {{ margin: 16px auto 0; max-width: 360px; }}
+    .pbar-meta {{ display: flex; justify-content: space-between; font-size: 11px; color: {CLR['text2']}; margin-bottom: 6px; }}
+    .pbar-track {{ background: {CLR['border']}; border-radius: 4px; height: 6px; }}
+    .pbar-fill {{ height: 6px; border-radius: 4px; transition: width .5s; }}
+    
+    /* 工序卡片 */
+    .proc-card {{
+        background: {CLR['card']};
+        border: 1px solid {CLR['border']};
+        border-radius: 12px;
+        padding: 20px 16px 16px;
+        text-align: center;
+    }}
+    .proc-icon {{ font-size: 20px; margin-bottom: 8px; }}
+    .proc-name {{ font-size: 11px; color: {CLR['text2']}; margin-bottom: 12px; letter-spacing: .3px; }}
+    .proc-num {{ font-size: 34px; font-weight: 700; line-height: 1; margin-bottom: 4px; }}
+    .proc-den {{ font-size: 11px; color: {CLR['text2']}; margin-bottom: 10px; }}
+    .mini-track {{ background: {CLR['border']}; border-radius: 3px; height: 4px; }}
+    .mini-fill {{ height: 4px; border-radius: 3px; }}
+    
+    /* 侧边栏样式 */
+    .sb-section {{ 
+        font-size: 11px; 
+        color: {CLR['text2']}; 
+        letter-spacing: 1.2px; 
+        text-transform: uppercase; 
+        margin-bottom: 12px; 
+        margin-top: 4px; 
+    }}
+    .proc-input-row {{ margin-bottom: 18px; }}
+    .proc-input-label {{ font-size: 12px; color: {CLR['text2']}; margin-bottom: 6px; }}
+    .big-num-display {{
+        text-align: center;
+        font-size: 30px;
+        font-weight: 700;
+        line-height: 1.2;
+        color: {CLR['text1']};
+        padding: 2px 0;
+    }}
+    .rf-dot {{
+        display: inline-block;
+        width: 7px; height: 7px;
+        border-radius: 50%;
+        margin-right: 5px;
+        vertical-align: middle;
+    }}
+    .thin-hr {{ border: none; border-top: 1px solid {CLR['border']}; margin: 20px 0; }}
+    
+    /* 图表标题 */
+    .chart-title {{
+        font-size: 13px; 
+        font-weight: 600;
+        color: {CLR['text2']};
+        letter-spacing: .5px;
+        text-transform: uppercase;
+        margin-bottom: 2px;
+    }}
+    
+    /* 按钮样式 */
+    [data-testid="stButton"] button {{
+        background: {CLR['card']};
+        color: {CLR['text1']};
+        border: 1px solid {CLR['border']};
+        border-radius: 8px;
+        font-size: 18px;
+        font-weight: 700;
+        padding: 2px 0;
+    }}
+    [data-testid="stButton"] button:hover {{
+        border-color: {CLR['blue']};
+        color: {CLR['blue']};
+    }}
 </style>
 """, unsafe_allow_html=True)
 
+# ═══════════════════════════════════════════════════════
+# 自动刷新设置
+# ═══════════════════════════════════════════════════════
+if "auto_refresh" not in st.session_state:
+    st.session_state.auto_refresh = True
 
-# ── 数据层 ───────────────────────────────────────────────────────────────────
-def _empty_day(total=0):
-    return {"total": total, "processes": {p: total for p in PROCESSES}}
+if st.session_state.auto_refresh:
+    st_autorefresh(interval=30_000, key="autorefresh_ticker")
 
-def load_data() -> dict:
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    # 生成30天示例数据
+# ═══════════════════════════════════════════════════════
+# 数据初始化
+# ═══════════════════════════════════════════════════════
+def _seed() -> dict:
     today = datetime.today()
-    records: dict = {}
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(42)
+    rec = {}
     for i in range(30, 0, -1):
-        d   = (today - timedelta(days=i)).strftime("%Y-%m-%d")
-        tot = int(rng.integers(7, 17))
-        records[d] = {"total": tot, "processes": {p: tot for p in PROCESSES}}
-    # 今日真实数据
-    records[today.strftime("%Y-%m-%d")] = _empty_day(15)
-    _save(records)
-    return records
+        d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+        tot = int(rng.integers(8, 17))
+        rec[d] = {"total": tot, "processes": {p: tot for p in PROCESSES}}
+    rec[today.strftime("%Y-%m-%d")] = {
+        "total": 15,
+        "processes": {p: 15 for p in PROCESSES},
+    }
+    return rec
 
-def _save(records: dict):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
+if "records" not in st.session_state:
+    st.session_state.records = _seed()
 
-records   = load_data()
 today_str = datetime.today().strftime("%Y-%m-%d")
-today_rec = records.get(today_str, _empty_day())
 
+# 初始化今日输入值
+_saved = st.session_state.records.get(today_str, {})
+for proc in PROCESSES:
+    key = f"input_{proc}"
+    if key not in st.session_state:
+        st.session_state[key] = _saved.get("processes", {}).get(proc, 0)
 
-# ── 侧边栏：数据录入 ──────────────────────────────────────────────────────────
+if "input_total" not in st.session_state:
+    st.session_state["input_total"] = _saved.get("total", 0)
+
+# ═══════════════════════════════════════════════════════
+# 侧边栏 - 数据录入
+# ═══════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("## 📝 今日数据录入")
-    st.markdown(f"**{today_str}**")
-    st.divider()
+    st.markdown("<div class='sb-section'>今日录入</div>", unsafe_allow_html=True)
+    st.markdown(f"<span style='font-size:12px;color:{CLR['text2']}'>{today_str}</span>", unsafe_allow_html=True)
+    st.markdown("<hr class='thin-hr'>", unsafe_allow_html=True)
 
-    new_proc = {}
-    for icon, proc in zip(PROCESS_ICONS, PROCESSES):
-        new_proc[proc] = st.number_input(
-            f"{icon} {proc}",
-            min_value=0, max_value=200,
-            value=today_rec["processes"].get(proc, 0),
-            step=1,
-        )
-    new_total = st.number_input(
-        "📦 今日总发布篇数",
-        min_value=0, max_value=200,
-        value=today_rec.get("total", 0),
+    for icon, proc in zip(P_ICONS, PROCESSES):
+        st.markdown(f"<div class='proc-input-label'>{icon}&nbsp; {proc}</div>", unsafe_allow_html=True)
+        key = f"input_{proc}"
+        c_l, c_m, c_r = st.columns([1, 2, 1])
+        with c_l:
+            if st.button("−", key=f"dec_{proc}", use_container_width=True):
+                st.session_state[key] = max(0, st.session_state[key] - 1)
+                st.rerun()
+        with c_m:
+            st.markdown(f"<div class='big-num-display'>{st.session_state[key]}</div>", unsafe_allow_html=True)
+        with c_r:
+            if st.button("＋", key=f"inc_{proc}", use_container_width=True):
+                st.session_state[key] += 1
+                st.rerun()
+
+    st.markdown("<hr class='thin-hr'>", unsafe_allow_html=True)
+    st.markdown("<div class='proc-input-label'>📦&nbsp; 今日总发布篇数</div>", unsafe_allow_html=True)
+    
+    st.session_state["input_total"] = st.number_input(
+        label="总篇数",
+        label_visibility="collapsed",
+        min_value=0,
+        max_value=500,
+        value=st.session_state["input_total"],
         step=1,
     )
-    if st.button("💾 保存今日数据", use_container_width=True, type="primary"):
-        records[today_str] = {"total": new_total, "processes": new_proc}
-        _save(records)
-        st.success("✅ 保存成功！")
+
+    if st.button("✅ 保存今日数据", use_container_width=True, type="primary"):
+        st.session_state.records[today_str] = {
+            "total": st.session_state["input_total"],
+            "processes": {p: st.session_state[f"input_{p}"] for p in PROCESSES},
+        }
+        st.success("已保存！")
         st.rerun()
-    st.divider()
-    st.caption("数据保存至本地 data.json")
 
+    st.markdown("<hr class='thin-hr'>", unsafe_allow_html=True)
+    st.markdown("<div class='sb-section'>系统设置</div>", unsafe_allow_html=True)
+    
+    auto_on = st.toggle(
+        "自动刷新（每 30 秒）",
+        value=st.session_state.auto_refresh,
+        key="auto_refresh_toggle",
+    )
+    if auto_on != st.session_state.auto_refresh:
+        st.session_state.auto_refresh = auto_on
+        st.rerun()
 
-# ── 刷新当日数据 ─────────────────────────────────────────────────────────────
-today_rec    = records.get(today_str, _empty_day())
-today_total  = today_rec["total"]
-today_procs  = today_rec["processes"]
-overall_rate = min(today_total / DAILY_TARGET * 100, 100)
+    st.markdown("<hr class='thin-hr'>", unsafe_allow_html=True)
+    st.markdown("<div class='sb-section'>数据备份</div>", unsafe_allow_html=True)
+    
+    st.download_button(
+        "⬇️ 导出 JSON",
+        data=json.dumps(st.session_state.records, ensure_ascii=False, indent=2).encode(),
+        file_name=f"bi_{today_str}.json",
+        mime="application/json",
+        use_container_width=True,
+    )
 
+    uploaded = st.file_uploader("导入 JSON", type="json", label_visibility="collapsed")
+    if uploaded:
+        try:
+            st.session_state.records = json.load(io.TextIOWrapper(uploaded, encoding="utf-8"))
+            st.success("数据已载入！")
+            st.rerun()
+        except Exception as e:
+            st.error(f"格式错误：{e}")
 
-# ════════════════════════════════════════════════════════════════════════════
-# 主界面
-# ════════════════════════════════════════════════════════════════════════════
-st.markdown("# 📊 内容创作 BI 看板")
-st.markdown(f"<span style='color:#888;font-size:14px'>今日：{today_str} &nbsp;|&nbsp; 每日目标：{DAILY_TARGET} 篇</span>", unsafe_allow_html=True)
-st.divider()
+# ═══════════════════════════════════════════════════════
+# 计算核心指标
+# ═══════════════════════════════════════════════════════
+records = st.session_state.records
+today_total = records.get(today_str, {}).get("total", 0)
+today_procs = records.get(today_str, {}).get("processes", {p: 0 for p in PROCESSES})
 
+rate = min(today_total / DAILY_TARGET * 100, 100)
 
-# ── Section 1: 顶部 KPI 卡片 ─────────────────────────────────────────────────
-st.markdown("### 今日总览")
-
-# 近7天均值（不含今天）
-last7_vals = [
-    records.get((datetime.today()-timedelta(days=i)).strftime("%Y-%m-%d"), {}).get("total", 0)
+last7 = [
+    records.get((datetime.today() - timedelta(days=i)).strftime("%Y-%m-%d"), {}).get("total", 0)
     for i in range(1, 8)
 ]
-avg7 = round(float(np.mean(last7_vals)), 1)
+avg7 = round(float(np.mean(last7)), 1)
+best = max((v.get("total", 0) for v in records.values()), default=0)
 
-# 历史最高
-all_totals = [v.get("total", 0) for v in records.values()]
-best = max(all_totals) if all_totals else 0
+last30 = sum(
+    records.get((datetime.today() - timedelta(days=i)).strftime("%Y-%m-%d"), {}).get("total", 0)
+    for i in range(30)
+)
 
-kpi_cols = st.columns(4, gap="medium")
+# ═══════════════════════════════════════════════════════
+# 主界面展示
+# ═══════════════════════════════════════════════════════
+now_str = datetime.now().strftime("%H:%M:%S")
+dot_color = CLR["green"] if st.session_state.auto_refresh else CLR["text3"]
+rf_label = "自动刷新 · 每30秒" if st.session_state.auto_refresh else "自动刷新已关闭"
 
-def kpi_card(col, title, value, sub, border_color):
+title_col, status_col = st.columns([3, 1])
+with title_col:
+    st.markdown(
+        f"<div class='page-title'>内容创作看板</div>"
+        f"<div class='page-sub'>{today_str} &nbsp;·&nbsp; 目标 {DAILY_TARGET} 篇 &nbsp;·&nbsp; 近30天累计 {last30} 篇</div>",
+        unsafe_allow_html=True,
+    )
+with status_col:
+    st.markdown(
+        f"<div style='text-align:right;padding-top:4px'>"
+        f"<span class='rf-dot' style='background:{dot_color}'></span>"
+        f"<span style='font-size:11px;color:{CLR['text2']}'>{rf_label}</span><br>"
+        f"<span style='font-size:11px;color:{CLR['text3']}'>最后更新 {now_str}</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+# Hero 区域 - 今日完成情况
+hero_color = CLR["green"] if today_total >= DAILY_TARGET else CLR["blue"]
+pbar_color = CLR["green"] if today_total >= DAILY_TARGET else CLR["blue"]
+badge_text = "达标 ✓" if today_total >= DAILY_TARGET else f"还差 {DAILY_TARGET - today_total} 篇"
+badge_color = CLR["green"] if today_total >= DAILY_TARGET else CLR["text2"]
+
+st.markdown(f"""
+<div class="hero">
+    <div class="hero-label">今日已发布</div>
+    <div class="hero-num" style="color:{hero_color}">
+        {today_total}<span class="hero-denom"> / {DAILY_TARGET}</span>
+    </div>
+    <div class="hero-sub">
+        完成率 <b style="color:{hero_color}">{rate:.0f}%</b>
+        &nbsp;·&nbsp; 7日均值 {avg7} 篇
+        &nbsp;·&nbsp; 历史最高 {best} 篇
+        &nbsp;·&nbsp; <span style="color:{badge_color}">{badge_text}</span>
+    </div>
+    <div class="pbar-wrap">
+        <div class="pbar-meta">
+            <span>完成率</span><span>{rate:.0f}%</span>
+        </div>
+        <div class="pbar-track">
+            <div class="pbar-fill" style="width:{rate:.1f}%;background:{pbar_color};"></div>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# 5个工序卡片
+cols = st.columns(5, gap="small")
+for col, icon, proc in zip(cols, P_ICONS, PROCESSES):
+    cnt = today_procs.get(proc, 0)
+    pct = min(cnt / DAILY_TARGET * 100, 100)
+    ncol = CLR["green"] if pct >= 100 else (CLR["blue"] if pct >= 70 else CLR["text2"])
+    bcol = CLR["green"] if pct >= 100 else (CLR["blue"] if pct >= 70 else CLR["border"])
+    
     col.markdown(f"""
-    <div class="kpi-card" style="border-left-color:{border_color}">
-        <div class="kpi-title">{title}</div>
-        <div class="kpi-value" style="color:{border_color}">{value}</div>
-        <div class="kpi-sub" style="color:#aaa">{sub}</div>
+    <div class="proc-card">
+        <div class="proc-icon">{icon}</div>
+        <div class="proc-name">{proc}</div>
+        <div class="proc-num" style="color:{ncol}">{cnt}</div>
+        <div class="proc-den">/ {DAILY_TARGET}</div>
+        <div class="mini-track">
+            <div class="mini-fill" style="width:{pct:.0f}%;background:{bcol};"></div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
-kpi_card(kpi_cols[0], "今日发布总篇数",
-         f"{today_total} 篇",
-         f"目标 {DAILY_TARGET} 篇 &nbsp;{'✅' if today_total >= DAILY_TARGET else '⏳'}",
-         COLORS["primary"])
+st.markdown("<div class='thin-hr'></div>", unsafe_allow_html=True)
 
-kpi_card(kpi_cols[1], "整体完成率",
-         f"{overall_rate:.0f}%",
-         f"{'已达标 🎉' if overall_rate >= 100 else f'还差 {DAILY_TARGET-today_total} 篇'}",
-         COLORS["success"] if overall_rate >= 100 else COLORS["warning"])
+# 图表区域
+chart_l, chart_r = st.columns([1.6, 1], gap="medium")
 
-kpi_card(kpi_cols[2], "近 7 天日均",
-         f"{avg7} 篇",
-         f"今日 {'↑' if today_total > avg7 else '↓'} {abs(today_total-avg7):.1f} vs 均值",
-         COLORS["muted"])
-
-kpi_card(kpi_cols[3], "历史单日最高",
-         f"{best} 篇",
-         f"{'🏆 今日刷新' if today_total >= best else '继续加油！'}",
-         COLORS["warning"])
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-
-# ── Section 2: 各工序今日完成 + 环形完成率 ──────────────────────────────────
-st.markdown("### 今日工序详情")
-proc_col, gauge_col = st.columns([1.2, 1], gap="large")
-
-with proc_col:
-    st.markdown("**各工序完成数量**")
-    for icon, proc, color in zip(PROCESS_ICONS, PROCESSES, COLORS["process"]):
-        cnt  = today_procs.get(proc, 0)
-        rate = min(cnt / DAILY_TARGET, 1.0)
-        pct  = rate * 100
-        bar_color = COLORS["success"] if pct >= 100 else (COLORS["warning"] if pct >= 70 else COLORS["danger"])
-        st.markdown(f"""
-        <div class="proc-wrap">
-            <div class="proc-label">
-                <span>{icon} <b>{proc}</b></span>
-                <span style="color:{bar_color};font-weight:600">{cnt} / {DAILY_TARGET}</span>
-            </div>
-            <div class="proc-bar-bg">
-                <div class="proc-bar-fg" style="width:{pct:.1f}%;background:{bar_color};"></div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-with gauge_col:
-    # 仪表盘
-    fig_gauge = go.Figure(go.Indicator(
-        mode  = "gauge+number",
-        value = overall_rate,
-        number= {"suffix": "%", "font": {"size": 52, "color": COLORS["primary"]}},
-        title = {"text": "整体完成率", "font": {"size": 16}},
-        gauge = {
-            "axis"  : {"range": [0, 100], "tickwidth": 1, "tickcolor": "#666"},
-            "bar"   : {"color": COLORS["success"] if overall_rate >= 100 else COLORS["primary"], "thickness": 0.25},
-            "bgcolor": "rgba(0,0,0,0)",
-            "steps" : [
-                {"range": [0,   60], "color": "rgba(231,76,60,0.15)"},
-                {"range": [60,  85], "color": "rgba(243,156,18,0.15)"},
-                {"range": [85, 100], "color": "rgba(46,204,113,0.15)"},
-            ],
-            "threshold": {
-                "line"     : {"color": "#E74C3C", "width": 3},
-                "thickness": 0.75,
-                "value"    : 100,
-            },
-        },
-    ))
-    fig_gauge.update_layout(
-        height=320,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor ="rgba(0,0,0,0)",
-        font={"color": "#ccc"},
-        margin=dict(t=50, b=10, l=30, r=30),
-    )
-    st.plotly_chart(fig_gauge, use_container_width=True)
-
-# 5工序雷达图
-    proc_values = [today_procs.get(p, 0) for p in PROCESSES]
-    fig_radar = go.Figure(go.Scatterpolar(
-        r     = proc_values + [proc_values[0]],
-        theta = PROCESSES + [PROCESSES[0]],
-        fill  = "toself",
-        fillcolor = "rgba(79,142,247,0.2)",
-        line  = dict(color=COLORS["primary"], width=2),
-        name  = "今日完成",
-    ))
-    fig_radar.add_trace(go.Scatterpolar(
-        r     = [DAILY_TARGET] * len(PROCESSES) + [DAILY_TARGET],
-        theta = PROCESSES + [PROCESSES[0]],
-        mode  = "lines",
-        line  = dict(color=COLORS["danger"], dash="dash", width=1.5),
-        name  = f"目标 {DAILY_TARGET}",
-    ))
-    fig_radar.update_layout(
-        polar=dict(
-            bgcolor="rgba(0,0,0,0)",
-            radialaxis=dict(visible=True, range=[0, DAILY_TARGET + 3], color="#888"),
-            angularaxis=dict(color="#aaa"),
-        ),
-        paper_bgcolor="rgba(0,0,0,0)",
-        font={"color": "#ccc"},
-        legend=dict(font=dict(size=11)),
-        height=300,
-        margin=dict(t=20, b=20),
-    )
-    st.plotly_chart(fig_radar, use_container_width=True)
-
-st.divider()
-
-
-# ── Section 3: 历史趋势（近30天）───────────────────────────────────────────
-st.markdown("### 历史发布趋势（近 30 天）")
-
-rows_hist = []
-for i in range(29, -1, -1):
-    d   = (datetime.today() - timedelta(days=i)).strftime("%Y-%m-%d")
-    tot = records.get(d, {}).get("total", 0)
-    rows_hist.append({"日期": d, "发布篇数": tot})
-df_hist = pd.DataFrame(rows_hist)
-df_hist["日期"] = pd.to_datetime(df_hist["日期"])
-
-fig_line = go.Figure()
-fig_line.add_trace(go.Scatter(
-    x=df_hist["日期"], y=df_hist["发布篇数"],
-    mode="lines+markers",
-    name="每日发布",
-    line=dict(color=COLORS["primary"], width=2.5, shape="spline"),
-    marker=dict(size=6, color=COLORS["primary"]),
-    fill="tozeroy",
-    fillcolor="rgba(79,142,247,0.1)",
-))
-fig_line.add_hline(
-    y=DAILY_TARGET, line_dash="dot", line_color=COLORS["danger"], line_width=1.5,
-    annotation_text=f"日目标 {DAILY_TARGET}", annotation_font_color=COLORS["danger"],
-    annotation_position="top right",
-)
-fig_line.add_hline(
-    y=avg7, line_dash="dash", line_color=COLORS["warning"], line_width=1.2,
-    annotation_text=f"7日均值 {avg7}", annotation_font_color=COLORS["warning"],
-    annotation_position="bottom right",
-)
-fig_line.update_layout(
-    height=340,
-    xaxis=dict(showgrid=False, title=""),
-    yaxis=dict(showgrid=True, gridcolor="rgba(128,128,128,0.15)", title="篇数"),
+LAYOUT_BASE = dict(
     paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor ="rgba(0,0,0,0)",
-    font={"color": "#ccc"},
-    hovermode="x unified",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    margin=dict(t=30, b=20),
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(color=CLR["text2"], size=11),
+    margin=dict(t=28, b=8, l=8, r=8),
+    xaxis=dict(showgrid=False, showline=False, title="", color=CLR["text3"]),
+    yaxis=dict(showgrid=True, gridcolor=CLR["gridline"], showline=False, title="", color=CLR["text3"]),
 )
-st.plotly_chart(fig_line, use_container_width=True)
 
+# 近30天趋势折线图
+with chart_l:
+    st.markdown("<div class='chart-title'>近 30 天发布趋势</div>", unsafe_allow_html=True)
+    hist = [
+        {
+            "日期": (datetime.today() - timedelta(days=i)).strftime("%Y-%m-%d"),
+            "篇数": records.get((datetime.today() - timedelta(days=i)).strftime("%Y-%m-%d"), {}).get("total", 0),
+        }
+        for i in range(29, -1, -1)
+    ]
+    df_h = pd.DataFrame(hist)
+    df_h["日期"] = pd.to_datetime(df_h["日期"])
+    
+    dot_c = [CLR["green"] if v >= DAILY_TARGET else CLR["text3"] for v in df_h["篇数"]]
 
-# ── Section 4: 近7天各工序分组柱状图 ────────────────────────────────────────
-st.markdown("### 近 7 天工序完成明细")
-
-rows_proc = []
-for i in range(6, -1, -1):
-    d        = (datetime.today() - timedelta(days=i)).strftime("%Y-%m-%d")
-    proc_day = records.get(d, {}).get("processes", {p: 0 for p in PROCESSES})
-    for proc, cnt in proc_day.items():
-        rows_proc.append({"日期": d, "工序": proc, "完成数": cnt})
-df_proc = pd.DataFrame(rows_proc)
-
-if not df_proc.empty:
-    fig_bar = px.bar(
-        df_proc,
-        x="日期", y="完成数", color="工序",
-        barmode="group",
-        color_discrete_sequence=COLORS["process"],
+    fig_l = go.Figure()
+    fig_l.add_trace(go.Scatter(
+        x=df_h["日期"], y=df_h["篇数"],
+        mode="lines+markers",
+        line=dict(color=CLR["blue"], width=1.8, shape="spline"),
+        marker=dict(size=5, color=dot_c, line=dict(width=0)),
+        fill="tozeroy",
+        fillcolor="rgba(79,142,247,0.05)",
+        hovertemplate="%{x|%m-%d}　%{y} 篇<extra></extra>",
+    ))
+    fig_l.add_hline(
+        y=DAILY_TARGET,
+        line_dash="dot",
+        line_color=CLR["border"],
+        line_width=1,
+        annotation_text=f"{DAILY_TARGET}",
+        annotation_font_color=CLR["text3"],
+        annotation_position="top right",
     )
-    fig_bar.add_hline(
-        y=DAILY_TARGET, line_dash="dot", line_color=COLORS["danger"],
-        annotation_text=f"目标 {DAILY_TARGET}", annotation_font_color=COLORS["danger"],
+    fig_l.update_layout(height=240, showlegend=False, **LAYOUT_BASE)
+    st.plotly_chart(fig_l, use_container_width=True)
+
+# 今日完成率环形图
+with chart_r:
+    st.markdown("<div class='chart-title'>今日完成率</div>", unsafe_allow_html=True)
+    ring_color = CLR["green"] if rate >= 100 else CLR["blue"]
+    fig_d = go.Figure(go.Pie(
+        values=[rate, max(100 - rate, 0)],
+        hole=0.72,
+        marker=dict(colors=[ring_color, CLR["border"]], line=dict(width=0)),
+        textinfo="none",
+        hoverinfo="skip",
+        sort=False,
+    ))
+    fig_d.add_annotation(
+        text=f"<b>{rate:.0f}%</b>",
+        x=0.5, y=0.5, showarrow=False,
+        font=dict(size=32, color=CLR["text1"]),
     )
-    fig_bar.update_layout(
-        height=320,
+    fig_d.update_layout(
+        height=240,
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor ="rgba(0,0,0,0)",
-        font={"color": "#ccc"},
-        xaxis=dict(showgrid=False, title=""),
-        yaxis=dict(showgrid=True, gridcolor="rgba(128,128,128,0.15)", title="篇数"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(t=40, b=20),
+        showlegend=False,
+        margin=dict(t=16, b=16, l=16, r=16),
     )
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_d, use_container_width=True)
 
+st.markdown("<div class='thin-hr'></div>", unsafe_allow_html=True)
 
-st.divider()
-st.caption("📁 数据存储于本地 `data.json` | 侧边栏可随时录入/更新今日数据")
+# 近7天工序柱状图
+st.markdown("<div class='chart-title'>近 7 天工序明细</div>", unsafe_allow_html=True)
+
+proc_rows = []
+for i in range(6, -1, -1):
+    d = (datetime.today() - timedelta(days=i)).strftime("%Y-%m-%d")
+    for proc in PROCESSES:
+        proc_rows.append({
+            "日期": d,
+            "工序": proc,
+            "完成数": records.get(d, {}).get("processes", {}).get(proc, 0),
+        })
+
+df_p = pd.DataFrame(proc_rows)
+fig_b = px.bar(
+    df_p, x="日期", y="完成数", color="工序",
+    barmode="group",
+    color_discrete_sequence=[CLR["blue"], "#3a7bd5", CLR["green"], "#27ae60", "#888888"],
+)
+fig_b.add_hline(
+    y=DAILY_TARGET,
+    line_dash="dot",
+    line_color=CLR["border"],
+    line_width=1,
+    annotation_text=f"{DAILY_TARGET}",
+    annotation_font_color=CLR["text3"],
+)
+fig_b.update_layout(
+    height=260,
+    showlegend=True,
+    legend=dict(
+        orientation="h", yanchor="bottom", y=1.01,
+        xanchor="right", x=1,
+        font=dict(size=10, color=CLR["text2"]),
+        bgcolor="rgba(0,0,0,0)",
+    ),
+    **LAYOUT_BASE,
+)
+st.plotly_chart(fig_b, use_container_width=True)
+
+st.markdown(
+    f"<div style='font-size:11px;color:{CLR['text3']};padding-top:8px'>"
+    f"提示：导出 JSON 备份后，下次使用前请从侧边栏导入即可恢复历史数据。"
+    f"</div>",
+    unsafe_allow_html=True,
+)
