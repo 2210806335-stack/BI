@@ -1,36 +1,3 @@
-"""
-内容创作看板 — 极简黑白版
-每日独立发布 15 篇文章追踪 | 支持自动刷新
-"""
-
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
-from datetime import datetime, timedelta
-from streamlit_autorefresh import st_autorefresh
-import json, io
-
-# ═══════════════════════════════════════════════════════
-# 常量
-# ═══════════════════════════════════════════════════════
-DAILY_TARGET  = 15
-PROCESSES     = ["制作图片", "制作封面", "剪辑视频", "写文案", "上传帖子"]
-P_ICONS       = ["🖼️", "🎨", "🎬", "✍️", "📤"]
-PROC_COLORS   = ["#4F8EF7", "#4F8EF7", "#2ECC71", "#4F8EF7", "#2ECC71"]  # 蓝绿交替
-
-# 黑白灰调色板
-CLR = {
-    "bg":       "#0e0e0e",   # 页面背景
-    "card":     "#161616",   # 卡片背景
-    "border":   "#262626",   # 边框
-    "text1":    "#f0f0f0",   # 主文字
-    "text2":    "#888888",   # 次要文字
-    "text3":    "#444444",   # 更暗文字
-    "blue":     "#4F8EF7",   # 蓝色强调
-    "green":    "#2ECC71",   # 绿色强调
-    "red":      "#E74C3C",   # 警告红
     "gridline": "rgba(255,255,255,0.05)",
 }
 
